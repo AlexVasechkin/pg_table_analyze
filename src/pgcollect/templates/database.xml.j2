@@ -1,0 +1,445 @@
+{# Confluence storage format (XHTML) для одной БД. #}
+{% from "_macros.xml.j2" import badge, yn, con_type %}
+<ac:structured-macro ac:name="info">
+  <ac:rich-text-body>
+    <p>Страница сгенерирована автоматически ({{ db.generated_at }}) инструментом
+    <code>pgcollect</code> для БД <code>{{ db.name }}</code> кластера
+    <code>{{ db.target }}</code>. Не редактируйте вручную — изменения будут перезаписаны.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+
+{% if db.warnings %}
+<ac:structured-macro ac:name="warning">
+  <ac:rich-text-body>
+    <p>Часть разделов собрана не полностью:</p>
+    <ul>
+    {% for w in db.warnings %}
+      <li>{{ w }}</li>
+    {% endfor %}
+    </ul>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% endif %}
+
+{% set ns = namespace(crit=0, warn=0) %}
+{% for i in db.issues %}
+{% if i.severity.value == 'crit' %}{% set ns.crit = ns.crit + 1 %}{% else %}{% set ns.warn = ns.warn + 1 %}{% endif %}
+{% endfor %}
+<h2>Сводка проблем</h2>
+{% if not db.issues %}
+<ac:structured-macro ac:name="tip">
+  <ac:rich-text-body><p>Проблемных сущностей не обнаружено.</p></ac:rich-text-body>
+</ac:structured-macro>
+{% else %}
+<ac:structured-macro ac:name="{% if ns.crit %}warning{% else %}note{% endif %}">
+  <ac:rich-text-body>
+    <p>Обнаружено проблем: <strong>{{ ns.crit }}</strong> критических, <strong>{{ ns.warn }}</strong> предупреждений. Подробности — в соответствующих разделах ниже.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+<table><tbody>
+<tr><th>Важность</th><th>Категория</th><th>Объект</th><th>Детали</th></tr>
+{% for i in db.issues %}
+<tr class="sev-{{ i.severity.value }}">
+  <td>{{ badge(i.severity) }}</td>
+  <td>{{ i.category }}</td>
+  <td>{{ i.entity }}</td>
+  <td>{{ i.detail | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>Обзор</h2>
+<table><tbody>
+<tr><th>Версия</th><td>{{ db.overview.version | d }}</td></tr>
+<tr><th>Размер БД</th><td>{{ db.overview.size_pretty }}</td></tr>
+<tr><th>Кодировка / collate / ctype</th><td>{{ db.overview.encoding | d }} / {{ db.overview.collate | d }} / {{ db.overview.ctype | d }}</td></tr>
+<tr><th>Подключения</th><td>{{ db.overview.connections }}{% if db.overview.connection_limit >= 0 %} / лимит {{ db.overview.connection_limit }}{% endif %}</td></tr>
+<tr><th>Схем / таблиц / индексов</th><td>{{ db.overview.n_schemas }} / {{ db.overview.n_tables }} / {{ db.overview.n_indexes }}</td></tr>
+<tr><th>Cache hit ratio</th><td>{% if db.overview.cache_hit_ratio is not none %}{{ db.overview.cache_hit_ratio }} %{% else %}—{% endif %}</td></tr>
+<tr><th>Temp files / объём</th><td>{{ db.overview.temp_files }} / {{ db.overview.temp_bytes_pretty }}</td></tr>
+<tr><th>Deadlocks</th><td>{{ db.overview.deadlocks }}</td></tr>
+<tr><th>default_statistics_target</th><td>{{ db.overview.default_statistics_target | d }}</td></tr>
+</tbody></table>
+
+{% if db.overview.extensions %}
+<h3>Расширения</h3>
+<table><tbody>
+<tr><th>Расширение</th><th>Версия</th><th>Схема</th><th>Доступна</th><th>Статус</th></tr>
+{% for e in db.overview.extensions %}
+<tr>
+  <td>{{ e.name }}</td>
+  <td>{{ e.version | d }}</td>
+  <td>{{ e.schema_name | d }}</td>
+  <td>{{ e.available_version | d }}</td>
+  <td>{% if e.outdated %}⚠ есть новее{% else %}✓{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>Схемы</h2>
+<table><tbody>
+<tr><th>Схема</th><th>Владелец</th><th>Размер</th><th>Таблиц</th><th>Индексов</th><th>Функций</th></tr>
+{% for s in db.schemas %}
+<tr>
+  <td>{{ s.name }}</td><td>{{ s.owner | d }}</td><td>{{ s.size_pretty }}</td>
+  <td>{{ s.n_tables }}</td><td>{{ s.n_indexes }}</td><td>{{ s.n_functions }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+
+<h2>Роли и привилегии</h2>
+{% if not db.roles.accessible %}
+<p>Раздел недоступен (недостаточно прав).</p>
+{% else %}
+<h3>Роли и членство</h3>
+<table><tbody>
+<tr><th>Роль</th><th>Login</th><th>Super</th><th>CreateRole</th><th>CreateDB</th><th>Repl</th><th>BypassRLS</th><th>Действует до</th><th>Входит в группы</th></tr>
+{% for r in db.roles.roles %}
+<tr{% if r.superuser or r.bypassrls or r.expired %} class="sev-warn"{% endif %}>
+  <td>{{ r.name }}</td>
+  <td>{{ yn(r.can_login) }}</td><td>{{ yn(r.superuser) }}</td>
+  <td>{{ yn(r.createrole) }}</td><td>{{ yn(r.createdb) }}</td>
+  <td>{{ yn(r.replication) }}</td><td>{{ yn(r.bypassrls) }}</td>
+  <td>{{ r.valid_until | d }}{% if r.expired %} ⚠ просрочено{% endif %}</td>
+  <td>{{ (r.member_of | join(', ')) | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+
+{% if db.roles.grants %}
+<h3>Привилегии на объекты</h3>
+<table><tbody>
+<tr><th>Грантополучатель</th><th>Тип</th><th>Схема</th><th>Объект</th><th>Привилегии</th></tr>
+{% for g in db.roles.grants %}
+<tr>
+  <td>{{ g.grantee }}</td><td>{{ g.object_type }}</td>
+  <td>{{ g.schema_name | d }}</td><td>{{ g.object_name | d }}</td>
+  <td>{{ g.privileges | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% endif %}
+
+<h2>Безопасность и доступ</h2>
+<h3>RLS-политики</h3>
+{% if not db.policies %}
+<p>Политик row-level security нет.</p>
+{% else %}
+<table><tbody>
+<tr><th>Таблица</th><th>Политика</th><th>Команда</th><th>Тип</th><th>Роли</th><th>USING</th><th>WITH CHECK</th></tr>
+{% for p in db.policies %}
+<tr>
+  <td>{{ p.schema_name }}.{{ p.table_name }}</td>
+  <td>{{ p.name }}</td>
+  <td>{{ p.command }}</td>
+  <td>{% if p.permissive %}permissive{% else %}restrictive{% endif %}</td>
+  <td>{{ p.roles | d }}</td>
+  <td>{% if p.using_expr %}<code>{{ p.using_expr }}</code>{% else %}—{% endif %}</td>
+  <td>{% if p.check_expr %}<code>{{ p.check_expr }}</code>{% else %}—{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.default_privileges %}
+<h3>Привилегии по умолчанию (ALTER DEFAULT PRIVILEGES)</h3>
+<table><tbody>
+<tr><th>Владелец</th><th>Схема</th><th>Тип объектов</th><th>Грантополучатель</th><th>Привилегии</th></tr>
+{% for dp in db.default_privileges %}
+<tr>
+  <td>{{ dp.owner }}</td><td>{{ dp.schema_name | d }}</td><td>{{ dp.object_type | d }}</td>
+  <td>{{ dp.grantee }}</td><td>{{ dp.privileges | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.event_triggers %}
+<h3>Event triggers</h3>
+<table><tbody>
+<tr><th>Имя</th><th>Событие</th><th>Функция</th><th>Теги</th><th>Состояние</th></tr>
+{% for et in db.event_triggers %}
+<tr{% if not et.enabled %} class="sev-warn"{% endif %}>
+  <td>{{ et.name }}</td><td>{{ et.event }}</td><td>{{ et.function }}</td>
+  <td>{{ et.tags | d }}</td>
+  <td>{% if et.enabled %}{{ et.enabled_state }}{% else %}⚠ {{ et.enabled_state }}{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>Таблицы</h2>
+<table><tbody>
+<tr><th>Таблица</th><th>Строк (оценка)</th><th>Размер</th><th>Индексы</th><th>Bloat</th><th>Dead %</th><th>Статус</th></tr>
+{% for t in db.tables %}
+<tr class="sev-{{ t.status.value }}">
+  <td>{{ t.fqname }}{% if t.partitioned %} (партиц.){% endif %}</td>
+  <td>{{ t.row_estimate }}</td>
+  <td>{{ t.total_pretty }}</td>
+  <td>{{ t.index_pretty }}</td>
+  <td>{% if t.bloat.heap_bloat_pct is not none %}{{ t.bloat.heap_bloat_pct }} %{% else %}—{% endif %}</td>
+  <td>{% if t.autovac.dead_pct is not none %}{{ t.autovac.dead_pct }} %{% else %}—{% endif %}</td>
+  <td>{{ badge(t.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+
+{% for t in db.tables %}
+<h3>{{ t.fqname }} {{ badge(t.status) }}</h3>
+<table><tbody>
+<tr><th>Владелец</th><td>{{ t.owner | d }}</td></tr>
+<tr><th>Тип</th><td>{% if t.partitioned %}партиционированная ({{ t.partition_strategy | d }}){% else %}{{ t.persistence }}{% endif %}</td></tr>
+{% if t.partition_key %}<tr><th>Ключ партиционирования</th><td>{{ t.partition_key }}</td></tr>{% endif %}
+{% if t.partitioned %}<tr><th>DEFAULT-партиция</th><td>{{ yn(t.has_default_partition) }}</td></tr>{% endif %}
+<tr><th>Размер (всего / heap / индексы)</th><td>{{ t.total_pretty }} / {{ t.heap_pretty }} / {{ t.index_pretty }}</td></tr>
+<tr><th>Строк (оценка)</th><td>{{ t.row_estimate }}</td></tr>
+<tr><th>Первичный ключ</th><td>{{ yn(t.has_pk) }}</td></tr>
+<tr><th>Row-level security</th><td>{{ yn(t.rls_enabled) }}</td></tr>
+<tr><th>Публикации</th><td>{{ (t.publications | join(', ')) | d }}</td></tr>
+<tr><th>Сканы seq / idx</th><td>{{ t.seq_scan | d }} / {{ t.idx_scan | d }}</td></tr>
+<tr><th>HOT-обновления</th><td>{% if t.hot_update_pct is not none %}{{ t.hot_update_pct }} %{% else %}—{% endif %}</td></tr>
+{% if t.comment %}<tr><th>Комментарий</th><td>{{ t.comment }}</td></tr>{% endif %}
+</tbody></table>
+
+<h4>Колонки</h4>
+<table><tbody>
+<tr><th>Колонка</th><th>Тип</th><th>NOT NULL</th><th>Default</th><th>Identity</th><th>Stat target</th><th>Комментарий</th></tr>
+{% for c in t.columns %}
+<tr>
+  <td>{{ c.name }}</td><td>{{ c.type }}</td><td>{{ yn(c.not_null) }}</td>
+  <td>{{ c.default | d }}</td><td>{{ c.identity | d }}</td><td>{{ c.stats_target | d }}</td>
+  <td>{{ c.comment | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+
+{% if t.partitions %}
+<h4>Партиции</h4>
+<table><tbody>
+<tr><th>Партиция</th><th>Границы</th><th>Размер</th><th>Строк (оценка)</th></tr>
+{% for p in t.partitions %}
+<tr><td>{{ p.name }}</td><td>{{ p.bound | d }}</td><td>{{ p.size_pretty }}</td><td>{{ p.row_estimate }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if t.indexes %}
+<h4>Индексы</h4>
+<table><tbody>
+<tr><th>Индекс</th><th>Метод</th><th>Уник.</th><th>Размер</th><th>Скан.</th><th>Bloat %</th><th>Фрагм. %</th><th>Определение</th><th>Примечание</th></tr>
+{% for i in t.indexes %}
+<tr>
+  <td>{{ i.name }}</td><td>{{ i.method | d }}</td><td>{{ yn(i.unique) }}</td>
+  <td>{{ i.size_pretty }}</td><td>{{ i.idx_scan | d }}</td>
+  <td>{% if i.bloat_pct is not none %}{{ i.bloat_pct }}{% else %}—{% endif %}</td>
+  <td>{% if i.fragmentation_pct is not none %}{{ i.fragmentation_pct }}{% else %}—{% endif %}</td>
+  <td><code>{{ i.definition }}</code></td>
+  <td>
+    {%- if not i.valid %}⚠ INVALID {% endif -%}
+    {%- if i.unused %}не используется {% endif -%}
+    {%- if i.duplicate_of %}дубль {{ i.duplicate_of }}{% endif -%}
+    {%- if i.valid and not i.unused and not i.duplicate_of %}✓{% endif -%}
+  </td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if t.constraints %}
+<h4>Ограничения</h4>
+<table><tbody>
+<tr><th>Тип</th><th>Имя</th><th>Определение</th><th>Valid</th></tr>
+{% for c in t.constraints %}
+<tr><td>{{ con_type(c.type) }}</td><td>{{ c.name }}</td><td><code>{{ c.definition }}</code></td><td>{{ yn(c.valid) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if t.triggers %}
+<h4>Триггеры</h4>
+<table><tbody>
+<tr><th>Имя</th><th>Когда</th><th>События</th><th>Уровень</th><th>Функция</th><th>Состояние</th><th>Определение</th></tr>
+{% for tr in t.triggers %}
+<tr>
+  <td>{{ tr.name }}</td>
+  <td>{{ tr.timing }}</td>
+  <td>{{ tr.events | d }}</td>
+  <td>{{ tr.level }}</td>
+  <td>{{ tr.function }}</td>
+  <td>{% if tr.enabled %}{{ tr.enabled_state }}{% else %}⚠ {{ tr.enabled_state }}{% endif %}</td>
+  <td><code>{{ tr.definition }}</code></td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h4>Обслуживание (bloat / автовакуум)</h4>
+<table><tbody>
+<tr><th>Bloat (метод)</th><td>{% if t.bloat.heap_bloat_pct is not none %}{{ t.bloat.heap_bloat_pct }} %{% else %}—{% endif %} ({{ t.bloat.method }}) {{ badge(t.bloat.status) }}</td></tr>
+<tr><th>TOAST</th><td>{{ t.bloat.toast_size_pretty }}</td></tr>
+<tr><th>Dead tuples</th><td>{{ t.autovac.n_dead_tup }}{% if t.autovac.dead_pct is not none %} ({{ t.autovac.dead_pct }} %){% endif %} / live {{ t.autovac.n_live_tup }}</td></tr>
+<tr><th>Порог vacuum / перейдён</th><td>{{ t.autovac.vacuum_threshold | d }} / {{ yn(t.autovac.over_vacuum_threshold) }}</td></tr>
+<tr><th>Порог analyze / перейдён</th><td>{{ t.autovac.analyze_threshold | d }} / {{ yn(t.autovac.over_analyze_threshold) }}</td></tr>
+<tr><th>Last (auto)vacuum</th><td>{{ t.autovac.last_autovacuum | d }} (ручной: {{ t.autovac.last_vacuum | d }})</td></tr>
+<tr><th>Last (auto)analyze</th><td>{{ t.autovac.last_autoanalyze | d }} (ручной: {{ t.autovac.last_analyze | d }})</td></tr>
+<tr><th>relfrozenxid age / wraparound</th><td>{{ t.autovac.relfrozenxid_age | d }}{% if t.autovac.wraparound_pct is not none %} ({{ t.autovac.wraparound_pct }} % от freeze_max_age){% endif %}</td></tr>
+<tr><th>Cache hit ratio</th><td>{% if t.cache_hit_ratio is not none %}{{ t.cache_hit_ratio }} %{% else %}—{% endif %}</td></tr>
+{% if t.autovac.reloptions %}<tr><th>reloptions</th><td>{{ t.autovac.reloptions | join(', ') }}</td></tr>{% endif %}
+</tbody></table>
+{% endfor %}
+
+<h2>Объекты БД</h2>
+
+<h3>Представления</h3>
+{% if not db.views %}
+<p>Представлений нет.</p>
+{% else %}
+<table><tbody>
+<tr><th>Представление</th><th>Тип</th><th>Владелец</th><th>Размер</th><th>Комментарий</th></tr>
+{% for v in db.views %}
+<tr>
+  <td>{{ v.schema_name }}.{{ v.name }}</td>
+  <td>{% if v.materialized %}materialized{% if not v.populated %} (не заполнено){% endif %}{% else %}view{% endif %}</td>
+  <td>{{ v.owner | d }}</td>
+  <td>{% if v.materialized %}{{ v.size_pretty }}{% else %}—{% endif %}</td>
+  <td>{{ v.comment | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.routines %}
+<h3>Функции и процедуры</h3>
+<table><tbody>
+<tr><th>Объект</th><th>Тип</th><th>Язык</th><th>Возвращает</th><th>Волатильность</th><th>SECURITY DEFINER</th></tr>
+{% for r in db.routines %}
+<tr{% if r.security_definer %} class="sev-warn"{% endif %}>
+  <td>{{ r.schema_name }}.{{ r.name }}</td>
+  <td>{{ r.kind }}</td><td>{{ r.language | d }}</td>
+  <td>{{ r.returns | d }}</td><td>{{ r.volatility | d }}</td>
+  <td>{% if r.security_definer %}⚠ да{% else %}нет{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.types %}
+<h3>Пользовательские типы</h3>
+<table><tbody>
+<tr><th>Тип</th><th>Вид</th><th>Владелец</th><th>Детали</th></tr>
+{% for tp in db.types %}
+<tr><td>{{ tp.schema_name }}.{{ tp.name }}</td><td>{{ tp.kind }}</td><td>{{ tp.owner | d }}</td><td>{{ tp.detail | d }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.foreign_servers or db.foreign_tables %}
+<h3>Сторонние данные (FDW)</h3>
+{% if db.foreign_servers %}
+<table><tbody>
+<tr><th>Сервер</th><th>FDW</th><th>Версия</th><th>Опции</th></tr>
+{% for s in db.foreign_servers %}
+<tr><td>{{ s.name }}</td><td>{{ s.fdw }}</td><td>{{ s.version | d }}</td><td>{{ s.options | d }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% if db.foreign_tables %}
+<table><tbody>
+<tr><th>Сторонняя таблица</th><th>Сервер</th><th>Опции</th></tr>
+{% for ft in db.foreign_tables %}
+<tr><td>{{ ft.schema_name }}.{{ ft.name }}</td><td>{{ ft.server }}</td><td>{{ ft.options | d }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% endif %}
+
+<h2>Публикации (логическая репликация)</h2>
+{% if not db.publications %}
+<p>Публикации в этой БД не настроены.</p>
+{% else %}
+{% for p in db.publications %}
+<h3>{{ p.name }}</h3>
+<table><tbody>
+<tr><th>Владелец</th><td>{{ p.owner | d }}</td></tr>
+<tr><th>Операции</th><td>{{ p.operations | d }}</td></tr>
+<tr><th>FOR ALL TABLES</th><td>{{ yn(p.all_tables) }}</td></tr>
+<tr><th>publish_via_partition_root</th><td>{{ yn(p.via_root) }}</td></tr>
+<tr><th>Таблиц</th><td>{{ p.tables | length }}</td></tr>
+</tbody></table>
+{% if p.all_tables and not p.tables %}
+<p>Публикуются все таблицы БД.</p>
+{% elif p.tables %}
+<table><tbody>
+<tr><th>Таблица</th><th>Опубликованные колонки</th><th>Фильтр строк</th></tr>
+{% for t in p.tables %}
+<tr>
+  <td>{{ t.name }}</td>
+  <td>{% if t.columns %}{{ t.columns | join(', ') }}{% else %}все{% endif %}</td>
+  <td>{{ t.row_filter | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+<h2>Дополнительные метрики</h2>
+
+{% if db.extras.top_objects %}
+<h3>Крупнейшие объекты</h3>
+<table><tbody>
+<tr><th>Тип</th><th>Схема</th><th>Объект</th><th>Размер</th></tr>
+{% for o in db.extras.top_objects %}
+<tr><td>{{ o.kind }}</td><td>{{ o.schema_name }}</td><td>{{ o.name }}</td><td>{{ o.size_pretty }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.extras.sequences %}
+<h3>Секвенции (риск исчерпания)</h3>
+<table><tbody>
+<tr><th>Секвенция</th><th>Привязана к</th><th>last_value</th><th>max_value</th><th>% использ.</th><th>Статус</th></tr>
+{% for s in db.extras.sequences %}
+<tr>
+  <td>{{ s.schema_name }}.{{ s.name }}</td><td>{{ s.owned_by | d }}</td>
+  <td>{{ s.last_value | d }}</td><td>{{ s.max_value | d }}</td>
+  <td>{% if s.pct_used is not none %}{{ s.pct_used }} %{% else %}—{% endif %}</td>
+  <td>{{ badge(s.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if db.extras.long_transactions %}
+<h3>Долгие / idle-in-transaction</h3>
+<table><tbody>
+<tr><th>PID</th><th>Пользователь</th><th>Состояние</th><th>Возраст, с</th><th>Запрос</th></tr>
+{% for x in db.extras.long_transactions %}
+<tr><td>{{ x.pid }}</td><td>{{ x.usename | d }}</td><td>{{ x.state | d }}</td><td>{{ x.xact_age_seconds | d }}</td><td><code>{{ x.query | d }}</code></td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h3>Потенциальные проблемы</h3>
+<table><tbody>
+<tr><th>Таблицы без PK</th><td>{{ (db.extras.tables_without_pk | join(', ')) | d }}</td></tr>
+<tr><th>Таблицы без индексов</th><td>{{ (db.extras.tables_without_index | join(', ')) | d }}</td></tr>
+<tr><th>Неиспользуемые индексы ({{ db.extras.unused_index_pretty }})</th><td>{{ (db.extras.unused_indexes | join(', ')) | d }}</td></tr>
+<tr><th>Невалидные индексы</th><td>{{ (db.extras.invalid_indexes | join(', ')) | d }}</td></tr>
+<tr><th>FK без индекса</th><td>{{ (db.extras.fk_without_index | join(', ')) | d }}</td></tr>
+<tr><th>Колонки с ручным stat target</th><td>{{ (db.extras.custom_stats_columns | join(', ')) | d }}</td></tr>
+<tr><th>Аномалии партиций</th><td>{{ (db.extras.partition_outliers | join('; ')) | d }}</td></tr>
+</tbody></table>
+
+{% if db.extras.top_queries %}
+<h3>Топ запросов (pg_stat_statements)</h3>
+<table><tbody>
+<tr><th>Вызовов</th><th>Сумм. время, мс</th><th>Средн., мс</th><th>Строк</th><th>Запрос</th></tr>
+{% for q in db.extras.top_queries %}
+<tr><td>{{ q.calls }}</td><td>{{ q.total_time_ms }}</td><td>{{ q.mean_time_ms }}</td><td>{{ q.rows }}</td><td><code>{{ q.query }}</code></td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}

@@ -1,0 +1,15 @@
+{# Общие макросы для страниц БД (storage format + HTML preview). #}
+
+{%- set _badge_text = {'ok': '✓ ok', 'warn': '⚠ warn', 'crit': '✗ crit', 'unknown': '? n/a'} -%}
+
+{%- macro badge(status) -%}
+<span class="badge {{ status.value }}">{{ _badge_text[status.value] }}</span>
+{%- endmacro -%}
+
+{%- macro yn(value) -%}
+{%- if value %}да{% else %}нет{% endif -%}
+{%- endmacro -%}
+
+{%- macro con_type(code) -%}
+{{ {'p': 'PRIMARY KEY', 'f': 'FOREIGN KEY', 'u': 'UNIQUE', 'c': 'CHECK', 'x': 'EXCLUDE'}[code] | default(code) }}
+{%- endmacro -%}

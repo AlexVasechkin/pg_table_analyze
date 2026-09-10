@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Артефакты сбора и рендера
+out/*.json
+out/*.xml
+out/*.html
+
+# Секреты
+*.pgpass
+.env
