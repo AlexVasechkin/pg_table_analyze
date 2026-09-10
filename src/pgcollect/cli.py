@@ -1,9 +1,10 @@
-"""CLI: pgcollect collect | render | preview | all.
+"""CLI: pgcollect collect | render | preview | markdown | all.
 
-collect — подключается к кластеру и пишет out/<db>.json (сырые собранные данные).
-render  — out/<db>.json → out/<db>.confluence.xml (Confluence storage format).
-preview — out/<db>.json → out/<db>.html (автономный HTML для браузера).
-all     — collect + render + preview за один прогон.
+collect  — подключается к кластеру и пишет out/<db>.json (сырые собранные данные).
+render   — out/<db>.json → out/<db>.confluence.xml (Confluence storage format).
+preview  — out/<db>.json → out/<db>.html (автономный HTML для браузера).
+markdown — out/<db>.json → out/<db>.md (Markdown-отчёт).
+all      — collect + render + preview + markdown за один прогон.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from .collector import collect_database
 from .config import Config, LoadError, Target, load_config
 from .db import connect, enumerate_databases
 from .models import Database
-from .preview import storage_to_html
+from .preview import storage_to_html, storage_to_markdown
 from .render import render_database
 
 app = typer.Typer(
@@ -119,6 +120,20 @@ def preview(
 
 
 @app.command()
+def markdown(
+    out: Path = typer.Option(DEFAULT_OUT, "--out", "-o", help="Каталог артефактов."),
+    db: Optional[str] = typer.Option(None, "--db", help="Только одна БД."),
+) -> None:
+    """out/<db>.json → out/<db>.md (Markdown-отчёт)."""
+    for data, path in _iter_json(out, db):
+        title = f"{data.name} — {data.target}"
+        target = out / f"{data.name}.md"
+        target.write_text(storage_to_markdown(render_database(data), title), encoding="utf-8")
+        typer.echo(f"→ {target}")
+    typer.secho("Готово.", fg=typer.colors.GREEN)
+
+
+@app.command()
 def all(
     target: str = typer.Argument(..., help="Имя цели из targets.yaml."),
     config: Path = typer.Option(DEFAULT_CONFIG, "--config", "-c", help="Файл целей."),
@@ -128,7 +143,7 @@ def all(
     skip: list[str] = typer.Option([], "--skip", help="Пропустить раздел."),
     stat_statements: bool = typer.Option(False, "--stat-statements", help="Собрать топ запросов из pg_stat_statements."),
 ) -> None:
-    """collect + render + preview за один прогон."""
+    """collect + render + preview + markdown за один прогон."""
     cfg = _load(config)
     tgt = _target(cfg, target)
     out.mkdir(parents=True, exist_ok=True)
@@ -143,7 +158,8 @@ def all(
         (out / f"{dbname}.confluence.xml").write_text(storage, encoding="utf-8")
         title = f"{data.name} — {data.target}"
         (out / f"{dbname}.html").write_text(storage_to_html(storage, title), encoding="utf-8")
-        typer.echo(f"→ out/{dbname}.{{json,confluence.xml,html}}")
+        (out / f"{dbname}.md").write_text(storage_to_markdown(storage, title), encoding="utf-8")
+        typer.echo(f"→ out/{dbname}.{{json,confluence.xml,html,md}}")
         for w in data.warnings:
             typer.secho(f"  ! {w}", fg=typer.colors.YELLOW)
 

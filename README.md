@@ -28,13 +28,14 @@ pip install -e .
 cp targets.example.yaml targets.yaml   # заполнить подключения
 export PGCOLLECT_PASSWORD=...           # пароль (имя переменной — из password_env)
 
-# полный цикл: сбор + Confluence + HTML для всех БД цели `local`
+# полный цикл: сбор + Confluence + HTML + Markdown для всех БД цели `local`
 pgcollect all local
 
 # по шагам:
 pgcollect collect local            # → out/<db>.json
 pgcollect render                   # out/<db>.json → out/<db>.confluence.xml
 pgcollect preview                  # out/<db>.json → out/<db>.html
+pgcollect markdown                 # out/<db>.json → out/<db>.md
 
 # только одна БД / точный bloat / пропуск раздела
 pgcollect all local --db billing --deep-bloat --skip roles
@@ -45,7 +46,8 @@ pgcollect all local --db billing --deep-bloat --skip roles
 - `<db>.json` — сырые собранные данные (для отладки и дифов между прогонами);
 - `<db>.confluence.xml` — вставляется в Confluence (редактор → «…» → `<>` вставка
   storage format);
-- `<db>.html` — автономная страница для просмотра в браузере.
+- `<db>.html` — автономная страница для просмотра в браузере;
+- `<db>.md` — Markdown-отчёт (для Git-репозиториев, wiki, code review).
 
 Разделение `collect` и `render`/`preview` позволяет собрать данные один раз и
 перегенерировать документы без повторного обращения к БД.
