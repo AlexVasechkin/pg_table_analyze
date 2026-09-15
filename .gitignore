@@ -15,3 +15,5 @@ out/*.html
 # Секреты
 *.pgpass
 .env
+
+targets.yaml
