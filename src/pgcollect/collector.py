@@ -63,7 +63,7 @@ def collect_database(
             _collect_objects(conn, db)
 
         if "security" not in skip:
-            _collect_security(conn, db)
+            _collect_security(conn, db, skip)
 
         if "publications" not in skip:
             _collect_publications(conn, db)
@@ -130,10 +130,13 @@ def _collect_objects(conn, db: Database) -> None:
         db, "foreign_tables", lambda: sql_objects.foreign_tables(conn)) or []
 
 
-def _collect_security(conn, db: Database) -> None:
+def _collect_security(conn, db: Database, skip: set[str]) -> None:
     db.policies = _try(db, "policies", lambda: sql_security.policies(conn)) or []
-    db.default_privileges = _try(
-        db, "default_privileges", lambda: sql_security.default_privileges(conn)) or []
+    # Привилегии по умолчанию (ALTER DEFAULT PRIVILEGES) — это привилегии, поэтому
+    # они относятся и к разделу ролей: --skip roles их тоже отключает.
+    if "roles" not in skip:
+        db.default_privileges = _try(
+            db, "default_privileges", lambda: sql_security.default_privileges(conn)) or []
     db.event_triggers = _try(
         db, "event_triggers", lambda: sql_security.event_triggers(conn)) or []
 
