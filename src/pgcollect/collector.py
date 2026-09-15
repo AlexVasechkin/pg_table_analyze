@@ -253,11 +253,26 @@ def _collect_issues(db: Database, target: Target) -> None:
             if av.wraparound_pct >= thr.wraparound_crit_pct:
                 issues.append(Issue(severity=Status.crit, category="Риск wraparound",
                                     entity=t.fqname,
-                                    detail=f"{av.wraparound_pct}% от freeze_max_age"))
+                                    detail=f"age {av.relfrozenxid_age} "
+                                           f"({av.wraparound_pct}% от лимита 2^31)"))
             elif av.wraparound_pct >= thr.wraparound_warn_pct:
                 issues.append(Issue(severity=Status.warn, category="Риск wraparound",
                                     entity=t.fqname,
-                                    detail=f"{av.wraparound_pct}% от freeze_max_age"))
+                                    detail=f"age {av.relfrozenxid_age} "
+                                           f"({av.wraparound_pct}% от лимита 2^31)"))
+        # Отдельный, более мягкий сигнал: форсированный freeze-autovacuum давно
+        # должен был отработать (age кратно превысил freeze_max_age), но age всё
+        # ещё высок → autovacuum не справляется. Само по себе превышение
+        # freeze_max_age — норма, поэтому порог кратности, а не факт превышения.
+        if (av.over_freeze_max_age and av.freeze_max_age
+                and av.relfrozenxid_age is not None
+                and av.relfrozenxid_age >= 2 * av.freeze_max_age
+                and (av.wraparound_pct is None
+                     or av.wraparound_pct < thr.wraparound_warn_pct)):
+            issues.append(Issue(severity=Status.warn, category="Autovacuum отстаёт (freeze)",
+                                entity=t.fqname,
+                                detail=f"age {av.relfrozenxid_age} > 2×freeze_max_age "
+                                       f"({av.freeze_max_age})"))
         for i in t.indexes:
             if not i.valid:
                 issues.append(Issue(severity=Status.crit, category="Невалидный индекс",

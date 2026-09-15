@@ -285,7 +285,7 @@
 <tr><th>Порог analyze / перейдён</th><td>{{ t.autovac.analyze_threshold | d }} / {{ yn(t.autovac.over_analyze_threshold) }}</td></tr>
 <tr><th>Last (auto)vacuum</th><td>{{ t.autovac.last_autovacuum | d }} (ручной: {{ t.autovac.last_vacuum | d }})</td></tr>
 <tr><th>Last (auto)analyze</th><td>{{ t.autovac.last_autoanalyze | d }} (ручной: {{ t.autovac.last_analyze | d }})</td></tr>
-<tr><th>relfrozenxid age / wraparound</th><td>{{ t.autovac.relfrozenxid_age | d }}{% if t.autovac.wraparound_pct is not none %} ({{ t.autovac.wraparound_pct }} % от freeze_max_age){% endif %}</td></tr>
+<tr><th>relfrozenxid age / wraparound</th><td>{{ t.autovac.relfrozenxid_age | d }}{% if t.autovac.wraparound_pct is not none %} ({{ t.autovac.wraparound_pct }} % от лимита wraparound 2^31){% endif %}{% if t.autovac.over_freeze_max_age %} — превышен freeze_max_age ({{ t.autovac.freeze_max_age | d }}), форсированный freeze-autovacuum{% endif %}</td></tr>
 <tr><th>Cache hit ratio</th><td>{% if t.cache_hit_ratio is not none %}{{ t.cache_hit_ratio }} %{% else %}—{% endif %}</td></tr>
 {% if t.autovac.reloptions %}<tr><th>reloptions</th><td>{{ t.autovac.reloptions | join(', ') }}</td></tr>{% endif %}
 </tbody></table>

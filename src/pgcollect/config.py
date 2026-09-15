@@ -31,7 +31,9 @@ class Thresholds(BaseModel):
     dead_tuple_crit_pct: float = 20.0
     # Выше этого размера точный pgstattuple не вызывается без --deep-bloat.
     pgstattuple_max_mb: int = 512
-    # Доля возраста relfrozenxid от autovacuum_freeze_max_age.
+    # Доля возраста relfrozenxid от РЕАЛЬНОГО лимита wraparound (2^31 транзакций),
+    # а НЕ от autovacuum_freeze_max_age (тот — лишь порог форсированного freeze-
+    # autovacuum). 50% ≈ 1.07 млрд XID, 75% ≈ 1.61 млрд (≈ vacuum_failsafe_age).
     wraparound_warn_pct: float = 50.0
     wraparound_crit_pct: float = 75.0
 

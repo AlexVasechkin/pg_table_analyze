@@ -17,6 +17,13 @@ from ..models import AutovacInfo
 
 _RELOPT_RE = re.compile(r"^([^=]+)=(.*)$")
 
+# Пространство XID 32-битное: реальный горизонт wraparound — 2^31 транзакций.
+# autovacuum_freeze_max_age (default 200M) — лишь порог, при котором PostgreSQL
+# ФОРСИРУЕТ anti-wraparound autovacuum, а не граница катастрофы. Поэтому риск
+# считаем как долю от 2^31, а превышение freeze_max_age трактуем отдельно
+# (форсированный freeze назрел / autovacuum отстаёт), но не как риск wraparound.
+_WRAPAROUND_LIMIT = 2**31  # 2 147 483 648
+
 
 def _globals(conn: psycopg.Connection) -> dict[str, float]:
     rows = query(
@@ -91,7 +98,11 @@ def collect(conn: psycopg.Connection) -> dict[tuple[str, str], AutovacInfo]:
         analyze_threshold = int(ana_thr + ana_scale * live)
 
         age = r["relfrozenxid_age"]
-        wrap_pct = round(100.0 * age / freeze_max_age, 1) if age else None
+        # Риск wraparound — доля от реального лимита 2^31, а не от freeze_max_age.
+        wrap_pct = round(100.0 * age / _WRAPAROUND_LIMIT, 1) if age else None
+        # Превышение freeze_max_age = форсированный freeze-autovacuum назрел/идёт.
+        # Норма при небольшом превышении; кратное превышение → autovacuum отстаёт.
+        over_freeze = bool(age and age > freeze_max_age)
 
         out[(r["schema_name"], r["table_name"])] = AutovacInfo(
             last_vacuum=r["last_vacuum"],
@@ -109,5 +120,7 @@ def collect(conn: psycopg.Connection) -> dict[tuple[str, str], AutovacInfo]:
             reloptions=r["reloptions"] or [],
             relfrozenxid_age=age,
             wraparound_pct=wrap_pct,
+            freeze_max_age=int(freeze_max_age),
+            over_freeze_max_age=over_freeze,
         )
     return out

@@ -174,7 +174,9 @@ class AutovacInfo(BaseModel):
     over_analyze_threshold: bool = False
     reloptions: list[str] = Field(default_factory=list)
     relfrozenxid_age: int | None = None
-    wraparound_pct: float | None = None
+    wraparound_pct: float | None = None  # доля age от лимита wraparound (2^31)
+    freeze_max_age: int | None = None
+    over_freeze_max_age: bool = False    # age > autovacuum_freeze_max_age
     status: Status = Status.ok
 
 
