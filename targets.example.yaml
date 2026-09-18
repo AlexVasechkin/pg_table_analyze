@@ -33,3 +33,41 @@ targets:
       # Порог размера объекта (МБ), выше которого точный pgstattuple НЕ вызывается
       # без флага --deep-bloat (чтобы не сканировать большие таблицы на prod).
       pgstattuple_max_mb: 512
+
+    # --- Только для pgservercollect (таблица оптимизации конфига) --------------
+    # pgcollect эти блоки игнорирует. PostgreSQL по SQL не знает RAM/CPU/тип диска,
+    # поэтому железо задаётся вручную — иначе числовые рекомендации остаются
+    # формулой-ориентиром.
+    #
+    # Профиль нагрузки — общий для кластера.
+    workload:
+      kind: oltp                 # oltp | olap | mixed
+      # Ожидаемое число ОДНОВРЕМЕННЫХ соединений (НЕ max_connections). От него, а не
+      # от завышенного max_connections, считается work_mem = ~25% RAM / connections.
+      connections: 100
+    #
+    # Железо ПО КАЖДОМУ узлу кластера. Рекомендации тюнинга считаются от ресурсов
+    # узла с role: leader (в кластере конфиг единый, его задаёт primary), независимо
+    # от того, к какому узлу подключились. Пометьте leader-узел role: leader.
+    nodes:
+      - name: pg1
+        role: leader              # leader | replica
+        cpu: 8                    # число ядер
+        mem: 16GB                 # "16GB" / "16384MB" / 16384 (число = МБ)
+        disk_type: ssd            # ssd | hdd | nvme
+      - name: pg2
+        role: replica
+        cpu: 8
+        mem: 16GB
+        disk_type: ssd
+      - name: pg3
+        role: replica
+        cpu: 4
+        mem: 8GB
+        disk_type: hdd
+    #
+    # Альтернатива для одиночного (не кластерного) сервера — один блок hardware:
+    # hardware:
+    #   total_ram_mb: 16384
+    #   cpu_count: 8
+    #   storage_type: ssd

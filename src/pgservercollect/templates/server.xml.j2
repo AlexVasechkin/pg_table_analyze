@@ -1,0 +1,393 @@
+{# Confluence storage format (XHTML) для кластера/экземпляра PostgreSQL. #}
+{% from "_macros.xml.j2" import badge, yn, basis_label, settings_table %}
+<ac:structured-macro ac:name="info">
+  <ac:rich-text-body>
+    <p>Страница сгенерирована автоматически ({{ srv.generated_at }}) инструментом
+    <code>pgservercollect</code> для кластера <code>{{ srv.target }}</code>
+    (<code>{{ srv.host }}:{{ srv.port }}</code>). Данные собраны через одно
+    read-only подключение к PostgreSQL. Не редактируйте вручную.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+
+{% if srv.warnings %}
+<ac:structured-macro ac:name="warning">
+  <ac:rich-text-body>
+    <p>Часть разделов собрана не полностью (нет прав / ошибка):</p>
+    <ul>
+    {% for w in srv.warnings %}
+      <li>{{ w }}</li>
+    {% endfor %}
+    </ul>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% endif %}
+
+{% set ns = namespace(crit=0, warn=0) %}
+{% for i in srv.issues %}
+{% if i.severity.value == 'crit' %}{% set ns.crit = ns.crit + 1 %}{% else %}{% set ns.warn = ns.warn + 1 %}{% endif %}
+{% endfor %}
+<h2>Сводка проблем</h2>
+{% if not srv.issues %}
+<ac:structured-macro ac:name="tip">
+  <ac:rich-text-body><p>Проблемных сигналов не обнаружено.</p></ac:rich-text-body>
+</ac:structured-macro>
+{% else %}
+<ac:structured-macro ac:name="{% if ns.crit %}warning{% else %}note{% endif %}">
+  <ac:rich-text-body>
+    <p>Обнаружено сигналов: <strong>{{ ns.crit }}</strong> критических,
+    <strong>{{ ns.warn }}</strong> предупреждений. Подробности — в разделах ниже.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+<table><tbody>
+<tr><th>Важность</th><th>Категория</th><th>Объект</th><th>Детали</th></tr>
+{% for i in srv.issues %}
+<tr class="sev-{{ i.severity.value }}">
+  <td>{{ badge(i.severity) }}</td>
+  <td>{{ i.category }}</td>
+  <td>{{ i.entity }}</td>
+  <td>{{ i.detail | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>Идентичность экземпляра</h2>
+{% set idn = srv.identity %}
+<table><tbody>
+<tr><th>Версия</th><td>{{ idn.version | d }}</td></tr>
+<tr><th>Роль</th><td>{% if idn.in_recovery %}standby (реплика){% else %}primary{% endif %}{% if idn.timeline %} · timeline {{ idn.timeline }}{% endif %}</td></tr>
+<tr><th>system_identifier</th><td>{{ idn.system_identifier | d }}</td></tr>
+<tr><th>cluster_name</th><td>{{ idn.cluster_name | d }}</td></tr>
+<tr><th>Контрольные суммы данных</th><td>{{ yn(idn.data_checksums) if idn.data_checksums is not none else '—' }}</td></tr>
+<tr><th>SSL</th><td>{{ yn(idn.ssl_in_use) if idn.ssl_in_use is not none else '—' }}</td></tr>
+<tr><th>Старт / uptime</th><td>{{ idn.start_time | d }} ({{ idn.uptime | d }})</td></tr>
+<tr><th>Загрузка конфигурации</th><td>{{ idn.conf_load_time | d }}</td></tr>
+<tr><th>Момент сбора</th><td>{{ idn.current_time | d }}</td></tr>
+</tbody></table>
+
+<h2>Репликация</h2>
+{% set rep = srv.replication %}
+<ac:structured-macro ac:name="note">
+  <ac:rich-text-body>
+    <p>Ниже — <strong>фактическая</strong> топология по данным PostgreSQL, а не
+    состояние Patroni/DCS. Через PG-подключение недоступны: лежащие узлы, теги и
+    приоритеты членов, история failover/switchover, DCS-конфигурация и режим
+    паузы Patroni.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+<table><tbody>
+<tr><th>Роль узла</th><td>{{ rep.role }}{% if rep.replay_paused %} (применение WAL приостановлено){% endif %}</td></tr>
+<tr><th>synchronous_commit</th><td>{{ rep.synchronous_commit | d }}</td></tr>
+<tr><th>synchronous_standby_names</th><td>{{ rep.synchronous_standby_names | d }}</td></tr>
+{% if rep.role == 'standby' %}
+<tr><th>Отставание применения</th><td>{% if rep.replay_lag_s is not none %}{{ rep.replay_lag_s | round(1) }} c{% else %}—{% endif %}</td></tr>
+<tr><th>receive / replay LSN</th><td>{{ rep.receive_lsn | d }} / {{ rep.replay_lsn | d }}</td></tr>
+<tr><th>Upstream (primary_conninfo)</th><td>{{ rep.primary_conninfo | d }}</td></tr>
+{% endif %}
+</tbody></table>
+
+{% if rep.wal_receiver %}
+<h3>WAL receiver (upstream)</h3>
+<table><tbody>
+<tr><th>Статус</th><td>{{ rep.wal_receiver.status | d }}</td></tr>
+<tr><th>Отправитель</th><td>{{ rep.wal_receiver.sender_host | d }}:{{ rep.wal_receiver.sender_port | d }}</td></tr>
+<tr><th>received / latest_end LSN</th><td>{{ rep.wal_receiver.received_lsn | d }} / {{ rep.wal_receiver.latest_end_lsn | d }}</td></tr>
+<tr><th>Последнее сообщение</th><td>{{ rep.wal_receiver.last_msg_receipt_time | d }}</td></tr>
+</tbody></table>
+{% endif %}
+
+{% if rep.standbys %}
+<h3>Подключённые реплики (со стороны primary)</h3>
+<table><tbody>
+<tr><th>Приложение</th><th>Адрес</th><th>Состояние</th><th>sync</th><th>Отставание (replay)</th><th>Отставание (байт)</th><th>Статус</th></tr>
+{% for s in rep.standbys %}
+<tr class="sev-{{ s.status.value }}">
+  <td>{{ s.application_name | d }}</td>
+  <td>{{ s.client_addr | d }}</td>
+  <td>{{ s.state | d }}</td>
+  <td>{{ s.sync_state | d }}</td>
+  <td>{% if s.replay_lag_s is not none %}{{ s.replay_lag_s | round(1) }} c{% else %}—{% endif %}</td>
+  <td>{{ s.lag_pretty | d }}</td>
+  <td>{{ badge(s.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if rep.slots %}
+<h3>Слоты репликации</h3>
+<table><tbody>
+<tr><th>Слот</th><th>Тип</th><th>Активен</th><th>Плагин</th><th>Удержанный WAL</th><th>wal_status</th><th>Статус</th></tr>
+{% for sl in rep.slots %}
+<tr class="sev-{{ sl.status.value }}">
+  <td>{{ sl.slot_name }}</td>
+  <td>{{ sl.slot_type | d }}</td>
+  <td>{{ yn(sl.active) }}</td>
+  <td>{{ sl.plugin | d }}</td>
+  <td>{{ sl.retained_wal_pretty | d }}</td>
+  <td>{{ sl.wal_status | d }}</td>
+  <td>{{ badge(sl.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>WAL и архивация</h2>
+{% set w = srv.wal %}
+<table><tbody>
+<tr><th>wal_level</th><td>{{ w.wal_level | d }}</td></tr>
+<tr><th>Текущий LSN / файл</th><td>{{ w.current_lsn | d }} / {{ w.current_wal_file | d }}</td></tr>
+<tr><th>archive_mode</th><td>{{ w.archive_mode | d }}</td></tr>
+<tr><th>archive_command</th><td>{% if w.archive_command %}<code>{{ w.archive_command }}</code>{% else %}—{% endif %}</td></tr>
+<tr><th>Заархивировано / ошибок</th><td>{{ w.archived_count | d }} / {{ w.failed_count | d }}</td></tr>
+<tr><th>Последний архив</th><td>{{ w.last_archived_wal | d }} ({{ w.last_archived_time | d }})</td></tr>
+{% if w.last_failed_wal %}<tr class="sev-warn"><th>Последняя ошибка архива</th><td>{{ w.last_failed_wal }} ({{ w.last_failed_time | d }})</td></tr>{% endif %}
+</tbody></table>
+
+<h2>Оптимизация конфигурации</h2>
+<ac:structured-macro ac:name="note">
+  <ac:rich-text-body>
+    <p>Рекомендации — стартовый ориентир, не автотюнинг. Значения с пометкой
+    «нужен рестарт» требуют перезапуска; проверяйте под нагрузкой.
+    Столбец «Основание»: <em>по вводным</em> — из RAM/CPU/типа диска в
+    targets.yaml; <em>по данным PG</em> — из рантайм-статистики; <em>ориентир</em>
+    — формула/best-practice без точных вводных.</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% if srv.tuning_notes %}
+<ac:structured-macro ac:name="warning">
+  <ac:rich-text-body>
+    <p>Для точных числовых рекомендаций не хватает вводных в <code>targets.yaml</code>:</p>
+    <ul>
+    {% for n in srv.tuning_notes %}
+      <li>{{ n }}</li>
+    {% endfor %}
+    </ul>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% endif %}
+{% if srv.tuning %}
+<table><tbody>
+<tr><th>Параметр</th><th>Дефолт</th><th>Текущее</th><th>Ед.</th><th>Рестарт</th><th>Рекомендация</th><th>Почему</th><th>Основание</th><th>Приоритет</th></tr>
+{% for t in srv.tuning %}
+<tr class="sev-{{ t.priority.value }}">
+  <td><code>{{ t.name }}</code></td>
+  <td>{{ t.default | d }}</td>
+  <td>{{ t.current | d }}</td>
+  <td>{{ t.unit | d }}</td>
+  <td>{{ yn(t.needs_restart) }}</td>
+  <td>{{ t.recommended | d }}</td>
+  <td>{{ t.rationale | d }}</td>
+  <td>{{ basis_label(t.basis) }}</td>
+  <td>{{ badge(t.priority) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.memory %}
+<h2>Потребление ОЗУ по компонентам</h2>
+<ac:structured-macro ac:name="note">
+  <ac:rich-text-body>
+    <p>Оценка потребления RAM по <strong>текущим настройкам</strong> кластера в трёх
+    сценариях. Разделяемая память (<code>shared_buffers</code>, <code>wal_buffers</code>,
+    прочие структуры) и maintenance-пул одинаковы во всех сценариях; различие — в числе
+    соединений и интенсивности <code>work_mem</code>. В колонке «Расчёт» указаны исходные
+    настройки: память соединений складывается из <code>work_mem</code> (на каждый узел
+    сортировки/хэша; для хэшей × <code>hash_mem_multiplier</code>), <code>temp_buffers</code>
+    и базового оверхеда backend'а — <em>фиксированной оценки</em> приватной памяти процесса
+    (не задаётся GUC).{% if srv.memory.ram_mb %} Доля указана от ОЗУ leader-узла
+    ({{ srv.memory.ram_mb }} МБ).{% endif %}</p>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% if srv.memory.notes %}
+<ac:structured-macro ac:name="warning">
+  <ac:rich-text-body>
+    <ul>
+    {% for n in srv.memory.notes %}
+      <li>{{ n }}</li>
+    {% endfor %}
+    </ul>
+  </ac:rich-text-body>
+</ac:structured-macro>
+{% endif %}
+{% for sc in srv.memory.scenarios %}
+<h3>{{ sc.name }} потребление — {{ sc.total_pretty }}{% if sc.pct_of_ram is not none %} ({{ sc.pct_of_ram }}% ОЗУ){% endif %}</h3>
+<p>{{ sc.basis }}</p>
+<table><tbody>
+<tr><th>Компонент / процесс</th><th>Расчёт</th><th>Память</th></tr>
+{% for l in sc.lines %}
+<tr>
+  <td>{{ l.component }}</td>
+  <td>{{ l.detail | d }}</td>
+  <td>{{ l.total_pretty }}</td>
+</tr>
+{% endfor %}
+<tr{% if sc.over_ram %} class="sev-crit"{% endif %}>
+  <td><strong>Итого</strong></td>
+  <td>{% if sc.pct_of_ram is not none %}{{ sc.pct_of_ram }}% ОЗУ{% if sc.over_ram %} — превышает RAM{% endif %}{% endif %}</td>
+  <td><strong>{{ sc.total_pretty }}</strong></td>
+</tr>
+</tbody></table>
+{% endfor %}
+{% endif %}
+
+{% if srv.settings %}
+{% set av_settings = srv.settings | selectattr('name', 'startingwith', 'autovacuum') | list %}
+{% set repl_settings = srv.settings | selectattr('category', 'startingwith', 'Replication') | list %}
+{% set wal_settings = srv.settings | selectattr('category', 'startingwith', 'Write-Ahead Log') | list %}
+{# Логирование: 'Reporting and Logging / *', кроме 'Process Title' (там cluster_name). #}
+{% set log_settings = srv.settings | selectattr('category', 'startingwith', 'Reporting and Logging') | rejectattr('category', 'startingwith', 'Reporting and Logging / Process Title') | list %}
+{% set log_names = log_settings | map(attribute='name') | list %}
+{% set conn_settings = srv.settings | selectattr('name', 'in', CONNECTION_SETTINGS) | list %}
+{# SELECT/параллелизм: категория 'Query Tuning' ЛИБО имя из QUERY_PARALLEL_SETTINGS. #}
+{% set _qt = srv.settings | selectattr('category', 'startingwith', 'Query Tuning') | map(attribute='name') | list %}
+{% set query_names = _qt + QUERY_PARALLEL_SETTINGS %}
+{% set query_settings = srv.settings | selectattr('name', 'in', query_names) | list %}
+{% set other_settings = srv.settings | rejectattr('name', 'startingwith', 'autovacuum') | rejectattr('category', 'startingwith', 'Replication') | rejectattr('category', 'startingwith', 'Write-Ahead Log') | rejectattr('name', 'in', log_names) | rejectattr('name', 'in', CONNECTION_SETTINGS) | rejectattr('name', 'in', query_names) | list %}
+{{ settings_table('Ключевые настройки', other_settings, GLOSSARY) }}
+{{ settings_table('Настройки WAL, чекпоинтов и архивации', wal_settings, GLOSSARY) }}
+{{ settings_table('Настройки SELECT-запросов и параллелизма', query_settings, GLOSSARY) }}
+{{ settings_table('Настройки логирования', log_settings, GLOSSARY) }}
+{{ settings_table('Настройки подключения и таймауты', conn_settings, GLOSSARY) }}
+{{ settings_table('Настройки репликации', repl_settings, GLOSSARY) }}
+{{ settings_table('Настройки автовакуума', av_settings, GLOSSARY) }}
+{% endif %}
+
+{% if srv.databases %}
+<h2>Базы данных</h2>
+<table><tbody>
+<tr><th>БД</th><th>Владелец</th><th>Размер</th><th>Подкл.</th><th>frozenxid age</th><th>Cache hit</th><th>Deadlocks</th><th>Temp</th><th>Статус</th></tr>
+{% for d in srv.databases %}
+<tr class="sev-{{ d.status.value }}">
+  <td>{{ d.name }}</td>
+  <td>{{ d.owner | d }}</td>
+  <td>{{ d.size_pretty }}</td>
+  <td>{{ d.connections }}{% if d.connection_limit >= 0 %}/{{ d.connection_limit }}{% endif %}</td>
+  <td>{{ d.frozenxid_age | d }}{% if d.wraparound_pct is not none %} ({{ d.wraparound_pct }}%){% endif %}</td>
+  <td>{% if d.cache_hit_ratio is not none %}{{ d.cache_hit_ratio }} %{% else %}—{% endif %}</td>
+  <td>{{ d.deadlocks }}</td>
+  <td>{{ d.temp_files }} / {{ d.temp_bytes_pretty }}</td>
+  <td>{{ badge(d.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<h2>Активность</h2>
+{% set a = srv.activity %}
+<table><tbody>
+<tr{% if a.status.value != 'ok' %} class="sev-{{ a.status.value }}"{% endif %}><th>Клиентские подключения</th><td>{{ a.total }} / {{ a.max_connections }}{% if a.used_pct is not none %} ({{ a.used_pct }}%){% endif %} {{ badge(a.status) }}</td></tr>
+<tr><th>active / idle in transaction</th><td>{{ a.active }} / {{ a.idle_in_transaction }}</td></tr>
+<tr><th>Старейшая транзакция / запрос</th><td>{{ a.oldest_xact_age_s | d }} c / {{ a.oldest_query_age_s | d }} c</td></tr>
+{% if a.by_state %}<tr><th>По состоянию</th><td>{% for b in a.by_state %}{{ b.key }}={{ b.count }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+{% if a.by_wait %}<tr><th>Топ ожиданий</th><td>{% for b in a.by_wait %}{{ b.key }}={{ b.count }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+{% if a.by_database %}<tr><th>По БД</th><td>{% for b in a.by_database %}{{ b.key }}={{ b.count }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+</tbody></table>
+
+<h2>Чекпоинты и фоновая запись</h2>
+{% set b = srv.bgwriter %}
+<table><tbody>
+<tr{% if b.status.value != 'ok' %} class="sev-{{ b.status.value }}"{% endif %}><th>Чекпоинты timed / req</th><td>{{ b.checkpoints_timed | d }} / {{ b.checkpoints_req | d }}{% if b.req_pct is not none %} ({{ b.req_pct }}% по требованию){% endif %}</td></tr>
+<tr><th>Время write / sync</th><td>{{ b.checkpoint_write_time_ms | d }} / {{ b.checkpoint_sync_time_ms | d }} мс</td></tr>
+<tr><th>buffers checkpoint / clean / backend</th><td>{{ b.buffers_checkpoint | d }} / {{ b.buffers_clean | d }} / {{ b.buffers_backend | d }}</td></tr>
+<tr><th>maxwritten_clean</th><td>{{ b.maxwritten_clean | d }}</td></tr>
+<tr><th>stats_reset</th><td>{{ b.stats_reset | d }}</td></tr>
+</tbody></table>
+
+{% if srv.locks %}
+<h2>Ожидания блокировок</h2>
+<table><tbody>
+<tr><th>PID</th><th>Пользователь</th><th>Блокируют (PID)</th><th>Ждёт, c</th><th>Запрос</th></tr>
+{% for lk in srv.locks %}
+<tr class="sev-warn">
+  <td>{{ lk.blocked_pid }}</td>
+  <td>{{ lk.blocked_user | d }}</td>
+  <td>{{ lk.blocking_pids | d }}</td>
+  <td>{{ lk.wait_seconds | d }}</td>
+  <td><code>{{ lk.query | d }}</code></td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.roles %}
+<h2>Роли</h2>
+<table><tbody>
+<tr><th>Роль</th><th>LOGIN</th><th>Атрибуты</th><th>conn limit</th><th>VALID UNTIL</th><th>Член групп</th></tr>
+{% for r in srv.roles %}
+<tr{% if r.expired %} class="sev-warn"{% endif %}>
+  <td>{{ r.name }}</td>
+  <td>{{ yn(r.can_login) }}</td>
+  <td>{% if r.superuser %}SUPERUSER {% endif %}{% if r.createrole %}CREATEROLE {% endif %}{% if r.createdb %}CREATEDB {% endif %}{% if r.replication %}REPLICATION {% endif %}{% if r.bypassrls %}BYPASSRLS {% endif %}</td>
+  <td>{% if r.conn_limit >= 0 %}{{ r.conn_limit }}{% else %}—{% endif %}</td>
+  <td>{{ r.valid_until | d }}{% if r.expired %} ⚠{% endif %}</td>
+  <td>{{ r.member_of | join(', ') | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.tablespaces %}
+<h2>Tablespaces</h2>
+<table><tbody>
+<tr><th>Имя</th><th>Владелец</th><th>Путь</th><th>Размер</th></tr>
+{% for ts in srv.tablespaces %}
+<tr>
+  <td>{{ ts.name }}</td>
+  <td>{{ ts.owner | d }}</td>
+  <td>{{ ts.location | d }}</td>
+  <td>{{ ts.size_pretty }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.subscriptions %}
+<h2>Подписки (логическая репликация)</h2>
+<table><tbody>
+<tr><th>Подписка</th><th>Включена</th><th>Слот</th><th>Воркеры</th><th>received / latest_end</th><th>Ошибки</th><th>Статус</th></tr>
+{% for s in srv.subscriptions %}
+<tr class="sev-{{ s.status.value }}">
+  <td>{{ s.name }}</td>
+  <td>{{ yn(s.enabled) }}</td>
+  <td>{{ s.slot_name | d }}</td>
+  <td>{{ s.worker_count }}</td>
+  <td>{{ s.received_lsn | d }} / {{ s.latest_end_lsn | d }}</td>
+  <td>{{ s.last_error | d }}</td>
+  <td>{{ badge(s.status) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.prepared_xacts %}
+<h2>Prepared-транзакции (2PC)</h2>
+<table><tbody>
+<tr><th>GID</th><th>БД</th><th>Владелец</th><th>Подготовлена</th><th>Возраст, c</th></tr>
+{% for px in srv.prepared_xacts %}
+<tr{% if (px.age_seconds or 0) > 60 %} class="sev-warn"{% endif %}>
+  <td>{{ px.gid }}</td>
+  <td>{{ px.database | d }}</td>
+  <td>{{ px.owner | d }}</td>
+  <td>{{ px.prepared | d }}</td>
+  <td>{{ px.age_seconds | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+{% if srv.progress %}
+<h2>Текущие операции (progress)</h2>
+<table><tbody>
+<tr><th>Операция</th><th>PID</th><th>БД</th><th>Фаза</th></tr>
+{% for p in srv.progress %}
+<tr>
+  <td>{{ p.kind }}</td>
+  <td>{{ p.pid }}</td>
+  <td>{{ p.database | d }}</td>
+  <td>{{ p.phase | d }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}

@@ -1,0 +1,35 @@
+{# Общие макросы серверного отчёта (storage format + HTML/Markdown preview). #}
+
+{%- set _badge_text = {'ok': '✓ ok', 'warn': '⚠ warn', 'crit': '✗ crit', 'unknown': '? n/a'} -%}
+
+{%- macro badge(status) -%}
+<span class="badge {{ status.value }}">{{ _badge_text[status.value] }}</span>
+{%- endmacro -%}
+
+{%- macro yn(value) -%}
+{%- if value %}да{% else %}нет{% endif -%}
+{%- endmacro -%}
+
+{%- macro basis_label(basis) -%}
+{{ {'inputs': 'по вводным', 'pg-data': 'по данным PG', 'heuristic': 'ориентир'}[basis] | default(basis) }}
+{%- endmacro -%}
+
+{%- macro settings_table(title, rows, glossary) -%}
+{% if rows %}
+<h2>{{ title }}</h2>
+<table><tbody>
+<tr><th>Параметр</th><th>Значение</th><th>Дефолт</th><th>Источник</th><th>Контекст</th><th>Рестарт</th><th>Пояснение</th></tr>
+{% for s in rows %}
+<tr{% if s.pending_restart %} class="sev-warn"{% endif %}>
+  <td><code>{{ s.name }}</code></td>
+  <td>{{ s.reset_val | d }}{% if s.unit %} {{ s.unit }}{% endif %}</td>
+  <td>{{ s.boot_val | d }}</td>
+  <td>{{ s.source | d }}</td>
+  <td>{{ s.context | d }}</td>
+  <td>{% if s.pending_restart %}⚠ ожидает{% else %}—{% endif %}</td>
+  <td>{{ glossary.get(s.name) or (s.short_desc | d) }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{%- endmacro -%}

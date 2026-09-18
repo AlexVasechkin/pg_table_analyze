@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 pgcollect = "pgcollect.cli:app"
+pgservercollect = "pgservercollect.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pgcollect"]
+packages = ["src/pgcollect", "src/pgservercollect"]
